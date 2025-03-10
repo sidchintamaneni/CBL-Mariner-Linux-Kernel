@@ -51,6 +51,11 @@ module_param(disable_pri, bool, 0444);
 MODULE_PARM_DESC(disable_pri,
         "Disable PRI for PCIe devices.");
 
+static unsigned int poll_timeout_override = ARM_SMMU_POLL_TIMEOUT_US;
+module_param(poll_timeout_override, uint, 0444);
+MODULE_PARM_DESC(poll_timeout_override,
+	"Override the default poll timeout threshold.");
+
 enum arm_smmu_msi_index {
 	EVTQ_MSI_INDEX,
 	GERROR_MSI_INDEX,
@@ -227,7 +232,7 @@ static void queue_poll_init(struct arm_smmu_device *smmu,
 	qp->delay = 1;
 	qp->spin_cnt = 0;
 	qp->wfe = !!(smmu->features & ARM_SMMU_FEAT_SEV);
-	qp->timeout = ktime_add_us(ktime_get(), ARM_SMMU_POLL_TIMEOUT_US);
+	qp->timeout = ktime_add_us(ktime_get(), poll_timeout_override);
 }
 
 static int queue_poll(struct arm_smmu_queue_poll *qp)
@@ -4155,7 +4160,7 @@ static int arm_smmu_write_reg_sync(struct arm_smmu_device *smmu, u32 val,
 
 	writel_relaxed(val, smmu->base + reg_off);
 	return readl_relaxed_poll_timeout(smmu->base + ack_off, reg, reg == val,
-					  1, ARM_SMMU_POLL_TIMEOUT_US);
+					  1, poll_timeout_override);
 }
 
 /* GBPA is "special" */
@@ -4165,7 +4170,7 @@ static int arm_smmu_update_gbpa(struct arm_smmu_device *smmu, u32 set, u32 clr)
 	u32 reg, __iomem *gbpa = smmu->base + ARM_SMMU_GBPA;
 
 	ret = readl_relaxed_poll_timeout(gbpa, reg, !(reg & GBPA_UPDATE),
-					 1, ARM_SMMU_POLL_TIMEOUT_US);
+					 1, poll_timeout_override);
 	if (ret)
 		return ret;
 
@@ -4173,7 +4178,7 @@ static int arm_smmu_update_gbpa(struct arm_smmu_device *smmu, u32 set, u32 clr)
 	reg |= set;
 	writel_relaxed(reg | GBPA_UPDATE, gbpa);
 	ret = readl_relaxed_poll_timeout(gbpa, reg, !(reg & GBPA_UPDATE),
-					 1, ARM_SMMU_POLL_TIMEOUT_US);
+					 1, poll_timeout_override);
 
 	if (ret)
 		dev_err(smmu->dev, "GBPA not responding to update\n");
