@@ -29,6 +29,7 @@ struct arm_vsmmu;
 #define IDR0_TTENDIAN_MIXED		0
 #define IDR0_TTENDIAN_LE		2
 #define IDR0_TTENDIAN_BE		3
+#define IDR0_ATSRECERR			(1 << 23)
 #define IDR0_CD2L			(1 << 19)
 #define IDR0_VMID16			(1 << 18)
 #define IDR0_PRI			(1 << 16)
@@ -109,6 +110,7 @@ struct arm_vsmmu;
 #define CR1_CACHE_WT			2
 
 #define ARM_SMMU_CR2			0x2c
+#define CR2_REC_CFG_ATS			(1 << 3)
 #define CR2_PTM				(1 << 2)
 #define CR2_RECINVSID			(1 << 1)
 #define CR2_E2H				(1 << 0)
@@ -768,6 +770,7 @@ struct arm_smmu_device {
 #define ARM_SMMU_FEAT_HD		(1 << 22)
 #define ARM_SMMU_FEAT_S2FWB		(1 << 23)
 #define ARM_SMMU_FEAT_BBML2		(1 << 24)
+#define ARM_SMMU_FEAT_ATS_REC_ERR	(1 << 25)
 	u32				features;
 
 #define ARM_SMMU_OPT_SKIP_PREFETCH	(1 << 0)
