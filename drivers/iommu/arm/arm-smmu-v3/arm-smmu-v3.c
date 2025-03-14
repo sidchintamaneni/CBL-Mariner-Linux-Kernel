@@ -4143,6 +4143,9 @@ static int arm_smmu_device_reset(struct arm_smmu_device *smmu)
 	if (smmu->features & ARM_SMMU_FEAT_E2H)
 		reg |= CR2_E2H;
 
+	if(smmu->features & ARM_SMMU_FEAT_ATS_REC_ERR)
+		reg |= CR2_REC_CFG_ATS;
+
 	writel_relaxed(reg, smmu->base + ARM_SMMU_CR2);
 
 	/* Stream table */
@@ -4392,6 +4395,9 @@ static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
 		dev_err(smmu->dev, "no translation support!\n");
 		return -ENXIO;
 	}
+
+	if (reg & IDR0_ATSRECERR)
+		smmu->features |= ARM_SMMU_FEAT_ATS_REC_ERR;
 
 	/* We only support the AArch64 table format at present */
 	switch (FIELD_GET(IDR0_TTF, reg)) {
