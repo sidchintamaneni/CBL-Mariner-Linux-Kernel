@@ -102,14 +102,13 @@ static int acpi_tad_set_real_time(struct device *dev, struct acpi_tad_rt *rt)
 	args[0].buffer.pointer = (u8 *)rt;
 	args[0].buffer.length = sizeof(*rt);
 
-	pm_runtime_get_sync(dev);
+	ACQUIRE(pm_runtime_active_try, pm)(dev);
+	if (ACQUIRE_ERR(pm_runtime_active_try, &pm))
+		return -ENXIO;
 
 	guard(mutex)(&acpi_tad_aml_lock);
 
 	status = acpi_evaluate_integer(handle, "_SRT", &arg_list, &retval);
-
-	pm_runtime_put_sync(dev);
-
 	if (ACPI_FAILURE(status) || retval)
 		return -EIO;
 
@@ -161,15 +160,11 @@ static int __acpi_tad_get_real_time(struct device *dev, struct acpi_tad_rt *rt)
 
 static int acpi_tad_get_real_time(struct device *dev, struct acpi_tad_rt *rt)
 {
-	int ret;
+	ACQUIRE(pm_runtime_active_try, pm)(dev);
+	if (ACQUIRE_ERR(pm_runtime_active_try, &pm))
+		return -ENXIO;
 
-	pm_runtime_get_sync(dev);
-
-	ret = __acpi_tad_get_real_time(dev, rt);
-
-	pm_runtime_put_sync(dev);
-
-	return ret;
+	return __acpi_tad_get_real_time(dev, rt);
 }
 
 static int __acpi_tad_wake_set(struct device *dev, char *method, u32 timer_id,
@@ -335,15 +330,11 @@ static const struct attribute_group acpi_tad_time_attr_group = {
 static int acpi_tad_wake_set(struct device *dev, char *method, u32 timer_id,
 			     u32 value)
 {
-	int ret;
+	ACQUIRE(pm_runtime_active_try, pm)(dev);
+	if (ACQUIRE_ERR(pm_runtime_active_try, &pm))
+		return -ENXIO;
 
-	pm_runtime_get_sync(dev);
-
-	ret = __acpi_tad_wake_set(dev, method, timer_id, value);
-
-	pm_runtime_put_sync(dev);
-
-	return ret;
+	return __acpi_tad_wake_set(dev, method, timer_id, value);
 }
 
 static int acpi_tad_wake_write(struct device *dev, const char *buf, char *method,
@@ -372,12 +363,11 @@ static ssize_t acpi_tad_wake_read(struct device *dev, char *buf, char *method,
 	unsigned long long retval;
 	int ret;
 
-	pm_runtime_get_sync(dev);
+	ACQUIRE(pm_runtime_active_try, pm)(dev);
+	if (ACQUIRE_ERR(pm_runtime_active_try, &pm))
+		return -ENXIO;
 
 	ret = __acpi_tad_wake_read(dev, method, timer_id, &retval);
-
-	pm_runtime_put_sync(dev);
-
 	if (ret)
 		return ret;
 
@@ -428,14 +418,13 @@ static int acpi_tad_clear_status(struct device *dev, u32 timer_id)
 
 	args[0].integer.value = timer_id;
 
-	pm_runtime_get_sync(dev);
+	ACQUIRE(pm_runtime_active_try, pm)(dev);
+	if (ACQUIRE_ERR(pm_runtime_active_try, &pm))
+		return -ENXIO;
 
 	guard(mutex)(&acpi_tad_aml_lock);
 
 	status = acpi_evaluate_integer(handle, "_CWS", &arg_list, &retval);
-
-	pm_runtime_put_sync(dev);
-
 	if (ACPI_FAILURE(status) || retval)
 		return -EIO;
 
@@ -471,14 +460,13 @@ static ssize_t acpi_tad_status_read(struct device *dev, char *buf, u32 timer_id)
 
 	args[0].integer.value = timer_id;
 
-	pm_runtime_get_sync(dev);
+	ACQUIRE(pm_runtime_active_try, pm)(dev);
+	if (ACQUIRE_ERR(pm_runtime_active_try, &pm))
+		return -ENXIO;
 
 	guard(mutex)(&acpi_tad_aml_lock);
 
 	status = acpi_evaluate_integer(handle, "_GWS", &arg_list, &retval);
-
-	pm_runtime_put_sync(dev);
-
 	if (ACPI_FAILURE(status))
 		return -EIO;
 
@@ -633,16 +621,15 @@ static void acpi_tad_remove(struct platform_device *pdev)
 
 	sysfs_remove_group(&dev->kobj, &acpi_tad_attr_group);
 
-	pm_runtime_get_noresume(dev);
-
-	acpi_tad_disable_timer(dev, ACPI_TAD_AC_TIMER);
-	acpi_tad_clear_status(dev, ACPI_TAD_AC_TIMER);
-	if (dd->capabilities & ACPI_TAD_DC_WAKE) {
-		acpi_tad_disable_timer(dev, ACPI_TAD_DC_TIMER);
-		acpi_tad_clear_status(dev, ACPI_TAD_DC_TIMER);
+	scoped_guard(pm_runtime_noresume, dev) {
+		acpi_tad_disable_timer(dev, ACPI_TAD_AC_TIMER);
+		acpi_tad_clear_status(dev, ACPI_TAD_AC_TIMER);
+		if (dd->capabilities & ACPI_TAD_DC_WAKE) {
+			acpi_tad_disable_timer(dev, ACPI_TAD_DC_TIMER);
+			acpi_tad_clear_status(dev, ACPI_TAD_DC_TIMER);
+		}
 	}
 
-	pm_runtime_put_noidle(dev);
 	pm_runtime_suspend(dev);
 	pm_runtime_disable(dev);
 	acpi_remove_cmos_rtc_space_handler(handle);
