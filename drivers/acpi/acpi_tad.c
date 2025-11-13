@@ -102,8 +102,8 @@ static int acpi_tad_set_real_time(struct device *dev, struct acpi_tad_rt *rt)
 	args[0].buffer.pointer = (u8 *)rt;
 	args[0].buffer.length = sizeof(*rt);
 
-	ACQUIRE(pm_runtime_active_try, pm)(dev);
-	if (ACQUIRE_ERR(pm_runtime_active_try, &pm))
+	PM_RUNTIME_ACQUIRE(dev, pm);
+	if (PM_RUNTIME_ACQUIRE_ERR(&pm))
 		return -ENXIO;
 
 	guard(mutex)(&acpi_tad_aml_lock);
@@ -160,8 +160,8 @@ static int __acpi_tad_get_real_time(struct device *dev, struct acpi_tad_rt *rt)
 
 static int acpi_tad_get_real_time(struct device *dev, struct acpi_tad_rt *rt)
 {
-	ACQUIRE(pm_runtime_active_try, pm)(dev);
-	if (ACQUIRE_ERR(pm_runtime_active_try, &pm))
+	PM_RUNTIME_ACQUIRE(dev, pm);
+	if (PM_RUNTIME_ACQUIRE_ERR(&pm))
 		return -ENXIO;
 
 	return __acpi_tad_get_real_time(dev, rt);
@@ -330,8 +330,8 @@ static const struct attribute_group acpi_tad_time_attr_group = {
 static int acpi_tad_wake_set(struct device *dev, char *method, u32 timer_id,
 			     u32 value)
 {
-	ACQUIRE(pm_runtime_active_try, pm)(dev);
-	if (ACQUIRE_ERR(pm_runtime_active_try, &pm))
+	PM_RUNTIME_ACQUIRE(dev, pm);
+	if (PM_RUNTIME_ACQUIRE_ERR(&pm))
 		return -ENXIO;
 
 	return __acpi_tad_wake_set(dev, method, timer_id, value);
@@ -363,8 +363,8 @@ static ssize_t acpi_tad_wake_read(struct device *dev, char *buf, char *method,
 	unsigned long long retval;
 	int ret;
 
-	ACQUIRE(pm_runtime_active_try, pm)(dev);
-	if (ACQUIRE_ERR(pm_runtime_active_try, &pm))
+	PM_RUNTIME_ACQUIRE(dev, pm);
+	if (PM_RUNTIME_ACQUIRE_ERR(&pm))
 		return -ENXIO;
 
 	ret = __acpi_tad_wake_read(dev, method, timer_id, &retval);
@@ -418,8 +418,8 @@ static int acpi_tad_clear_status(struct device *dev, u32 timer_id)
 
 	args[0].integer.value = timer_id;
 
-	ACQUIRE(pm_runtime_active_try, pm)(dev);
-	if (ACQUIRE_ERR(pm_runtime_active_try, &pm))
+	PM_RUNTIME_ACQUIRE(dev, pm);
+	if (PM_RUNTIME_ACQUIRE_ERR(&pm))
 		return -ENXIO;
 
 	guard(mutex)(&acpi_tad_aml_lock);
@@ -460,8 +460,8 @@ static ssize_t acpi_tad_status_read(struct device *dev, char *buf, u32 timer_id)
 
 	args[0].integer.value = timer_id;
 
-	ACQUIRE(pm_runtime_active_try, pm)(dev);
-	if (ACQUIRE_ERR(pm_runtime_active_try, &pm))
+	PM_RUNTIME_ACQUIRE(dev, pm);
+	if (PM_RUNTIME_ACQUIRE_ERR(&pm))
 		return -ENXIO;
 
 	guard(mutex)(&acpi_tad_aml_lock);
