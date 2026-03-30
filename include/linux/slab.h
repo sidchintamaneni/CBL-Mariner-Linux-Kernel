@@ -533,6 +533,26 @@ static inline bool kmem_dump_obj(void *object) { return false; }
 #endif
 
 /*
+ * Align memory allocations to cache lines if DMA API debugging is active
+ * to avoid false positive DMA overlapping error messages.
+ */
+#ifdef CONFIG_DMA_API_DEBUG
+#ifndef ARCH_KMALLOC_MINALIGN
+#define ARCH_KMALLOC_MINALIGN  L1_CACHE_BYTES
+#elif ARCH_KMALLOC_MINALIGN < L1_CACHE_BYTES
+#undef ARCH_KMALLOC_MINALIGN
+#define ARCH_KMALLOC_MINALIGN  L1_CACHE_BYTES
+#endif
+#elif
+#ifndef ARCH_KMALLOC_MINALIGN
+#define ARCH_KMALLOC_MINALIGN __alignof__(unsigned long long)
+#elif ARCH_KMALLOC_MINALIGN > 8
+#define KMALLOC_MIN_SIZE ARCH_KMALLOC_MINALIGN
+#define KMALLOC_SHIFT_LOW ilog2(KMALLOC_MIN_SIZE)
+#endif
+#endif
+
+/*
  * Some archs want to perform DMA into kmalloc caches and need a guaranteed
  * alignment larger than the alignment of a 64-bit integer.
  * Setting ARCH_DMA_MINALIGN in arch headers allows that.
@@ -541,13 +561,6 @@ static inline bool kmem_dump_obj(void *object) { return false; }
 #if ARCH_DMA_MINALIGN > 8 && !defined(ARCH_KMALLOC_MINALIGN)
 #define ARCH_KMALLOC_MINALIGN ARCH_DMA_MINALIGN
 #endif
-#endif
-
-#ifndef ARCH_KMALLOC_MINALIGN
-#define ARCH_KMALLOC_MINALIGN __alignof__(unsigned long long)
-#elif ARCH_KMALLOC_MINALIGN > 8
-#define KMALLOC_MIN_SIZE ARCH_KMALLOC_MINALIGN
-#define KMALLOC_SHIFT_LOW ilog2(KMALLOC_MIN_SIZE)
 #endif
 
 /*
