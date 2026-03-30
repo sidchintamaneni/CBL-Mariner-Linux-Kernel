@@ -77,14 +77,28 @@
 .macro __init_el2_hcrx
 	mrs	x0, id_aa64mmfr1_el1
 	ubfx	x0, x0, #ID_AA64MMFR1_EL1_HCX_SHIFT, #4
-	cbz	x0, .Lskip_hcrx_\@
+	cbz	x0, .Lskip_hcx_shift_hcrx_\@
 	mov_q	x0, (HCRX_EL2_MSCEn | HCRX_EL2_TCR2En | HCRX_EL2_EnFPM)
 
+.Lskip_hcx_shift_hcrx_\@:
         /* Enable GCS if supported */
 	mrs_s	x1, SYS_ID_AA64PFR1_EL1
 	ubfx	x1, x1, #ID_AA64PFR1_EL1_GCS_SHIFT, #4
-	cbz	x1, .Lset_hcrx_\@
+	cbz	x1, .Lskip_gcs_shift_hcrx_\@
 	orr	x0, x0, #HCRX_EL2_GCSEn
+
+.Lskip_gcs_shift_hcrx_\@:
+	/* Enable LS64, LS64_V, LS64_ACCDATA if supported */
+	mrs_s	x1, SYS_ID_AA64ISAR1_EL1
+	ubfx	x1, x1, #ID_AA64ISAR1_EL1_LS64_SHIFT, #4
+	cbz	x1, .Lskip_hcrx_\@
+	orr	x0, x0, #HCRX_EL2_EnALS
+	cmp	x1, #ID_AA64ISAR1_EL1_LS64_LS64_V
+	b.lt	.Lskip_hcrx_\@
+	orr	x0, x0, #HCRX_EL2_EnASR
+	cmp	x1, #ID_AA64ISAR1_EL1_LS64_LS64_ACCDATA
+	b.lt	.Lskip_hcrx_\@
+	orr	x0, x0, #HCRX_EL2_EnAS0
 
 .Lset_hcrx_\@:
 	msr_s	SYS_HCRX_EL2, x0
@@ -380,6 +394,14 @@
 	orr	x0, x0, #HFGRTR_EL2_nPOR_EL0
 
 .Lskip_poe_fgt_\@:
+	mrs_s	x1, SYS_ID_AA64ISAR1_EL1
+	ubfx	x1, x1, #ID_AA64ISAR1_EL1_LS64_SHIFT, #4
+	cmp	x1, #ID_AA64ISAR1_EL1_LS64_LS64_ACCDATA
+
+	/* Disable the trapping of ACCDATA_EL1 */
+	orr	x0, x0, #HFGRTR_EL2_nACCDATA_EL1
+	orr	x0, x0, #HFGWTR_EL2_nACCDATA_EL1
+
 	/* GCS depends on PIE so we don't check it if PIE is absent */
 	mrs_s	x1, SYS_ID_AA64PFR1_EL1
 	ubfx	x1, x1, #ID_AA64PFR1_EL1_GCS_SHIFT, #4
