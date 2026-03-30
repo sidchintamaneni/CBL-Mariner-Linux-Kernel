@@ -51,7 +51,8 @@ static inline u64 translate_sctlr_el2_to_sctlr_el1(u64 val)
 {
 	/* Only preserve the minimal set of bits we support */
 	val &= (SCTLR_ELx_M | SCTLR_ELx_A | SCTLR_ELx_C | SCTLR_ELx_SA |
-		SCTLR_ELx_I | SCTLR_ELx_IESB | SCTLR_ELx_WXN | SCTLR_ELx_EE);
+		SCTLR_ELx_I | SCTLR_ELx_IESB | SCTLR_ELx_WXN | SCTLR_ELx_EE |
+		SCTLR_ELx_EnASR | SCTLR_ELx_EnAS0 | SCTLR_ELx_EnALS);
 	val |= SCTLR_EL1_RES1;
 
 	return val;
