@@ -45,6 +45,11 @@
 
 #include <acpi/cppc_acpi.h>
 
+#include <linux/interrupt.h>
+#include <linux/irq_work.h>
+#include <linux/smp.h>
+#include <trace/events/ipi.h>
+
 struct cppc_pcc_data {
 	struct pcc_mbox_chan *pcc_channel;
 	bool pcc_channel_acquired;
@@ -78,6 +83,8 @@ struct cppc_pcc_data {
 	int mpar_count;
 	int refcount;
 };
+
+struct workqueue_struct *cppc_wq;
 
 /* Array to represent the PCC channel per subspace ID */
 static struct cppc_pcc_data *pcc_data[MAX_PCC_SUBSPACES];
@@ -181,6 +188,7 @@ show_cppc_data(cppc_get_perf_caps, cppc_perf_caps, lowest_nonlinear_perf);
 show_cppc_data(cppc_get_perf_caps, cppc_perf_caps, guaranteed_perf);
 show_cppc_data(cppc_get_perf_caps, cppc_perf_caps, lowest_freq);
 show_cppc_data(cppc_get_perf_caps, cppc_perf_caps, nominal_freq);
+show_cppc_data(cppc_get_perf_caps, cppc_perf_caps, desired_perf);
 
 show_cppc_data(cppc_get_perf_ctrs, cppc_perf_fb_ctrs, reference_perf);
 show_cppc_data(cppc_get_perf_ctrs, cppc_perf_fb_ctrs, wraparound_time);
@@ -222,6 +230,7 @@ static struct attribute *cppc_attrs[] = {
 	&nominal_perf.attr,
 	&nominal_freq.attr,
 	&lowest_freq.attr,
+	&desired_perf.attr,
 	NULL
 };
 ATTRIBUTE_GROUPS(cppc);
@@ -756,14 +765,15 @@ int acpi_cppc_processor_probe(struct acpi_processor *pr)
 	 */
 	if ((cpc_rev == CPPC_V2_REV && num_ent != CPPC_V2_NUM_ENT) ||
 	    (cpc_rev == CPPC_V3_REV && num_ent != CPPC_V3_NUM_ENT) ||
-	    (cpc_rev > CPPC_V3_REV && num_ent <= CPPC_V3_NUM_ENT)) {
+	    (cpc_rev == CPPC_V4_REV && num_ent != CPPC_V4_NUM_ENT) ||
+	    (cpc_rev > CPPC_V4_REV && num_ent <= CPPC_V4_NUM_ENT)) {
 		pr_debug("Unexpected number of _CPC return package entries (%d) for CPU:%d\n",
 			 num_ent, pr->id);
 		goto out_free;
 	}
-	if (cpc_rev > CPPC_V3_REV) {
-		num_ent = CPPC_V3_NUM_ENT;
-		cpc_rev = CPPC_V3_REV;
+	if (cpc_rev > CPPC_V4_REV) {
+		num_ent = CPPC_V4_NUM_ENT;
+		cpc_rev = CPPC_V4_REV;
 	}
 
 	cpc_ptr->num_entries = num_ent;
@@ -846,6 +856,9 @@ int acpi_cppc_processor_probe(struct acpi_processor *pr)
 
 			cpc_ptr->cpc_regs[i-2].type = ACPI_TYPE_BUFFER;
 			memcpy(&cpc_ptr->cpc_regs[i-2].cpc_entry.reg, gas_t, sizeof(*gas_t));
+		} else if (cpc_obj->type == ACPI_TYPE_PACKAGE) {
+			/* ACPI 6.4 Table 8.23 Optional Resource Priority Registers */
+			continue;
 		} else {
 			pr_debug("Invalid entry type (%d) in _CPC for CPU:%d\n",
 				 i, pr->id);
@@ -882,6 +895,12 @@ int acpi_cppc_processor_probe(struct acpi_processor *pr)
 
 		init_rwsem(&pcc_data[pcc_subspace_id]->pcc_lock);
 		init_waitqueue_head(&pcc_data[pcc_subspace_id]->pcc_write_wait_q);
+	}
+
+	cppc_wq = alloc_workqueue("cppc_wq", __WQ_LEGACY, 1);
+	if (!cppc_wq) {
+		ret = -EINVAL;
+		goto out_free;
 	}
 
 	/* Everything looks okay */
@@ -947,6 +966,8 @@ void acpi_cppc_processor_exit(struct acpi_processor *pr)
 			}
 		}
 	}
+
+	destroy_workqueue(cppc_wq);
 
 	cpc_ptr = per_cpu(cpc_desc_ptr, pr->id);
 	if (!cpc_ptr)
@@ -1179,6 +1200,52 @@ static int cpc_write(int cpu, struct cpc_register_resource *reg_res, u64 val)
 	return ret_val;
 }
 
+static void cpc_cpu_read(struct work_struct *work)
+{
+	struct cppc_rw_work *read_work;
+	struct cppc_cpu_ctr *c;
+	struct cpc_register_resource *reg_res;
+
+	read_work = container_of(work, struct cppc_rw_work,
+					  work);
+	c = &read_work->c;
+	reg_res = read_work->reg_res;
+
+	cpc_read(c->cpu, reg_res, &c->val);
+}
+
+static void cpc_cpu_write(struct work_struct *work)
+{
+	struct cppc_rw_work *write_work;
+	struct cppc_cpu_ctr *c;
+	struct cpc_register_resource *reg_res;
+
+	write_work = container_of(work, struct cppc_rw_work,
+					  work);
+	c = &write_work->c;
+	reg_res = write_work->reg_res;
+
+	cpc_write(c->cpu, reg_res, c->val);
+}
+
+static void cpc_cpu_rw_wq(int cpunum, struct cpc_register_resource *reg_res, u64 *val, int flag)
+{
+	struct cppc_rw_work cppc_work;
+
+	cppc_work.c.cpu = cpunum;
+	cppc_work.reg_res = reg_res;
+	cppc_work.c.val = flag == CPC_CPU_WQ_WRITE ? *val : 0;
+	if(flag == CPC_CPU_WQ_WRITE)
+		INIT_WORK_ONSTACK(&cppc_work.work, cpc_cpu_write);
+	else
+		INIT_WORK_ONSTACK(&cppc_work.work, cpc_cpu_read);
+
+	queue_work_on(cpunum, cppc_wq, &cppc_work.work);
+	flush_work(&cppc_work.work);
+
+	*val = flag == CPC_CPU_WQ_READ ? cppc_work.c.val : *val;
+}
+
 static int cppc_get_reg_val_in_pcc(int cpu, struct cpc_register_resource *reg, u64 *val)
 {
 	int pcc_ss_id = per_cpu(cpu_pcc_subspace_idx, cpu);
@@ -1229,7 +1296,9 @@ static int cppc_get_reg_val(int cpu, enum cppc_regs reg_idx, u64 *val)
 	if (CPC_IN_PCC(reg))
 		return cppc_get_reg_val_in_pcc(cpu, reg, val);
 
-	return cpc_read(cpu, reg, val);
+	cpc_cpu_rw_wq(cpu, reg, val, CPC_CPU_WQ_READ);
+
+	return 0;
 }
 
 static int cppc_set_reg_val_in_pcc(int cpu, struct cpc_register_resource *reg, u64 val)
@@ -1278,7 +1347,9 @@ static int cppc_set_reg_val(int cpu, enum cppc_regs reg_idx, u64 val)
 	if (CPC_IN_PCC(reg))
 		return cppc_set_reg_val_in_pcc(cpu, reg, val);
 
-	return cpc_write(cpu, reg, val);
+	cpc_cpu_rw_wq(cpu, reg, &val, CPC_CPU_WQ_WRITE);
+
+	return 0;
 }
 
 /**
@@ -1343,9 +1414,9 @@ int cppc_get_perf_caps(int cpunum, struct cppc_perf_caps *perf_caps)
 {
 	struct cpc_desc *cpc_desc = per_cpu(cpc_desc_ptr, cpunum);
 	struct cpc_register_resource *highest_reg, *lowest_reg,
-		*lowest_non_linear_reg, *nominal_reg, *guaranteed_reg,
+		*lowest_non_linear_reg, *nominal_reg, *guaranteed_reg, *desired_reg,
 		*low_freq_reg = NULL, *nom_freq_reg = NULL;
-	u64 high, low, guaranteed, nom, min_nonlinear, low_f = 0, nom_f = 0;
+	u64 high, low, guaranteed, nom, min_nonlinear, desired, low_f = 0, nom_f = 0;
 	int pcc_ss_id = per_cpu(cpu_pcc_subspace_idx, cpunum);
 	struct cppc_pcc_data *pcc_ss_data = NULL;
 	int ret = 0, regs_in_pcc = 0;
@@ -1362,6 +1433,7 @@ int cppc_get_perf_caps(int cpunum, struct cppc_perf_caps *perf_caps)
 	low_freq_reg = &cpc_desc->cpc_regs[LOWEST_FREQ];
 	nom_freq_reg = &cpc_desc->cpc_regs[NOMINAL_FREQ];
 	guaranteed_reg = &cpc_desc->cpc_regs[GUARANTEED_PERF];
+	desired_reg = &cpc_desc->cpc_regs[DESIRED_PERF];
 
 	/* Are any of the regs PCC ?*/
 	if (CPC_IN_PCC(highest_reg) || CPC_IN_PCC(lowest_reg) ||
@@ -1382,14 +1454,18 @@ int cppc_get_perf_caps(int cpunum, struct cppc_perf_caps *perf_caps)
 		}
 	}
 
-	cpc_read(cpunum, highest_reg, &high);
+	cpc_cpu_rw_wq(cpunum, highest_reg, &high, CPC_CPU_WQ_READ);
 	perf_caps->highest_perf = high;
 
-	cpc_read(cpunum, lowest_reg, &low);
+	cpc_cpu_rw_wq(cpunum, lowest_reg, &low, CPC_CPU_WQ_READ);
 	perf_caps->lowest_perf = low;
 
-	cpc_read(cpunum, nominal_reg, &nom);
+	cpc_cpu_rw_wq(cpunum, nominal_reg, &nom, CPC_CPU_WQ_READ);
 	perf_caps->nominal_perf = nom;
+
+	cpc_cpu_rw_wq(cpunum, desired_reg, &desired, CPC_CPU_WQ_READ);
+	perf_caps->desired_perf = desired;
+
 
 	if (guaranteed_reg->type != ACPI_TYPE_BUFFER  ||
 	    IS_NULL_REG(&guaranteed_reg->cpc_entry.reg)) {
@@ -1399,18 +1475,20 @@ int cppc_get_perf_caps(int cpunum, struct cppc_perf_caps *perf_caps)
 		perf_caps->guaranteed_perf = guaranteed;
 	}
 
-	cpc_read(cpunum, lowest_non_linear_reg, &min_nonlinear);
+	cpc_cpu_rw_wq(cpunum, lowest_non_linear_reg, &min_nonlinear, CPC_CPU_WQ_READ);
 	perf_caps->lowest_nonlinear_perf = min_nonlinear;
 
 	if (!high || !low || !nom || !min_nonlinear)
 		ret = -EFAULT;
 
 	/* Read optional lowest and nominal frequencies if present */
-	if (CPC_SUPPORTED(low_freq_reg))
-		cpc_read(cpunum, low_freq_reg, &low_f);
+	if (CPC_SUPPORTED(low_freq_reg)) {
+		cpc_cpu_rw_wq(cpunum, low_freq_reg, &low_f, CPC_CPU_WQ_READ);
+	}
 
-	if (CPC_SUPPORTED(nom_freq_reg))
-		cpc_read(cpunum, nom_freq_reg, &nom_f);
+	if (CPC_SUPPORTED(nom_freq_reg)) {
+		cpc_cpu_rw_wq(cpunum, nom_freq_reg, &nom_f, CPC_CPU_WQ_READ);
+	}
 
 	perf_caps->lowest_freq = low_f;
 	perf_caps->nominal_freq = nom_f;
@@ -1526,8 +1604,9 @@ int cppc_get_perf_ctrs(int cpunum, struct cppc_perf_fb_ctrs *perf_fb_ctrs)
 	 * platform
 	 */
 	ctr_wrap_time = (u64)(~((u64)0));
-	if (CPC_SUPPORTED(ctr_wrap_reg))
+	if (CPC_SUPPORTED(ctr_wrap_reg)) {
 		cpc_read(cpunum, ctr_wrap_reg, &ctr_wrap_time);
+	}
 
 	if (!delivered || !reference ||	!ref_perf) {
 		ret = -EFAULT;
@@ -1746,6 +1825,7 @@ int cppc_set_perf(int cpu, struct cppc_perf_ctrls *perf_ctrls)
 	struct cpc_register_resource *desired_reg, *min_perf_reg, *max_perf_reg;
 	int pcc_ss_id = per_cpu(cpu_pcc_subspace_idx, cpu);
 	struct cppc_pcc_data *pcc_ss_data = NULL;
+	u64 val;
 	int ret = 0;
 
 	if (!cpc_desc) {
@@ -1787,17 +1867,23 @@ int cppc_set_perf(int cpu, struct cppc_perf_ctrls *perf_ctrls)
 		cpc_desc->write_cmd_status = 0;
 	}
 
-	cpc_write(cpu, desired_reg, perf_ctrls->desired_perf);
+	val = perf_ctrls->desired_perf;
+	cpc_cpu_rw_wq(cpu, desired_reg, &val, CPC_CPU_WQ_WRITE);
+
 
 	/*
 	 * Only write if min_perf and max_perf not zero. Some drivers pass zero
 	 * value to min and max perf, but they don't mean to set the zero value,
 	 * they just don't want to write to those registers.
 	 */
-	if (perf_ctrls->min_perf)
-		cpc_write(cpu, min_perf_reg, perf_ctrls->min_perf);
-	if (perf_ctrls->max_perf)
-		cpc_write(cpu, max_perf_reg, perf_ctrls->max_perf);
+	if (perf_ctrls->min_perf) {
+		val = perf_ctrls->min_perf;
+		cpc_cpu_rw_wq(cpu, min_perf_reg, &val, CPC_CPU_WQ_WRITE);
+	}
+	if (perf_ctrls->max_perf) {
+		val = perf_ctrls->max_perf;
+		cpc_cpu_rw_wq(cpu, max_perf_reg, &val, CPC_CPU_WQ_WRITE);
+	}
 
 	if (CPC_IN_PCC(desired_reg) || CPC_IN_PCC(min_perf_reg) || CPC_IN_PCC(max_perf_reg))
 		up_read(&pcc_ss_data->pcc_lock);	/* END Phase-I */
