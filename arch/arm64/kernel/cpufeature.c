@@ -1129,7 +1129,7 @@ static void init_32bit_cpu_features(struct cpuinfo_32bit *info)
 }
 
 #ifdef CONFIG_ARM64_PSEUDO_NMI
-static bool enable_pseudo_nmi;
+static bool enable_pseudo_nmi = true;
 
 static int __init early_enable_pseudo_nmi(char *p)
 {
