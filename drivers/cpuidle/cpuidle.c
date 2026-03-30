@@ -39,6 +39,7 @@ LIST_HEAD(cpuidle_detected_devices);
 static int enabled_devices;
 static int off __read_mostly;
 static int initialized __read_mostly;
+static int max_state_count = INT_MAX;
 
 int cpuidle_disabled(void)
 {
@@ -652,6 +653,9 @@ static int __cpuidle_register_device(struct cpuidle_device *dev)
 
 		if (drv->states[i].flags & CPUIDLE_FLAG_OFF)
 			dev->states_usage[i].disable |= CPUIDLE_STATE_DISABLED_BY_USER;
+
+		for (i = drv->state_count - 1; i >= max_state_count; i--)
+			dev->states_usage[i].disable |= CPUIDLE_STATE_DISABLED_BY_USER;
 	}
 
 	per_cpu(cpuidle_devices, cpu) = dev;
@@ -815,9 +819,13 @@ static int __init cpuidle_init(void)
 	if (cpuidle_disabled())
 		return -ENODEV;
 
+	if (!max_state_count)
+		max_state_count = INT_MAX;
+
 	return cpuidle_add_interface();
 }
 
 module_param(off, int, 0444);
+module_param(max_state_count, int, 0444);
 module_param_string(governor, param_governor, CPUIDLE_NAME_LEN, 0444);
 core_initcall(cpuidle_init);
