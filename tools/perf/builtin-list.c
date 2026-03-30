@@ -163,7 +163,7 @@ static void default_print_event(void *ps, const char *topic,
 		pos = fprintf(fp, "  %s", event_name);
 
 	if (!topic && event_type_desc) {
-		for (; pos < 53; pos++)
+		for (; pos < 73; pos++)
 			fputc(' ', fp);
 		fprintf(fp, "[%s]\n", event_type_desc);
 	} else
