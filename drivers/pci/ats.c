@@ -410,8 +410,9 @@ int pci_enable_pasid(struct pci_dev *pdev, int features)
 	if (WARN_ON(pdev->pasid_enabled))
 		return -EBUSY;
 
-	if (!pdev->eetlp_prefix_max && !pdev->pasid_no_tlp)
-		return -EINVAL;
+// TODO: Disable until firmware fix for b860329
+//	if (!pdev->eetlp_prefix_max && !pdev->pasid_no_tlp)
+//		return -EINVAL;
 
 	if (!pasid)
 		return -EINVAL;
