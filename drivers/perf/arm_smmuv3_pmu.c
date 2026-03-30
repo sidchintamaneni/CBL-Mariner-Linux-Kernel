@@ -102,6 +102,11 @@
 #define SMMU_PMCG_PIDR4                 0xFD0
 #define SMMU_PMCG_PIDR4_DES_2           GENMASK(3, 0)
 
+/* IMP IDs */
+#define SMMU_PMCG_TCU			0x487
+#define SMMU_PMCG_TBU			0x488
+#define SMMU_PMCG_PART_0_SHIFT		20
+
 /* MSI config fields */
 #define MSI_CFG0_ADDR_MASK              GENMASK_ULL(51, 2)
 #define MSI_CFG2_MEMATTR_DEVICE_nGnRE   0x1
@@ -111,8 +116,15 @@
 
 #define SMMU_PMCG_MAX_COUNTERS          64
 #define SMMU_PMCG_ARCH_MAX_EVENTS       128
+/* Spec defines an upper limit of 64K events, however limiting to 256
+for now given there are no more than 256 currently defined */
+#define SMMU_PMCG_IMPL_MAX_EVENTS       256
 
 #define SMMU_PMCG_PA_SHIFT              12
+
+#define SMMU_TCUID_INDEX_2		0x1001FFFFF
+#define SMMU_TBUID_INDEX_2		0x18FF
+#define SMMU_TBUID_INDEX_3		0xFF00FF0000
 
 #define SMMU_PMCG_EVCNTR_RDONLY         BIT(0)
 #define SMMU_PMCG_HARDEN_DISABLE        BIT(1)
@@ -124,6 +136,8 @@ struct smmu_pmu {
 	struct perf_event *events[SMMU_PMCG_MAX_COUNTERS];
 	DECLARE_BITMAP(used_counters, SMMU_PMCG_MAX_COUNTERS);
 	DECLARE_BITMAP(supported_events, SMMU_PMCG_ARCH_MAX_EVENTS);
+	DECLARE_BITMAP(tcu_supported_events, SMMU_PMCG_IMPL_MAX_EVENTS);
+	DECLARE_BITMAP(tbu_supported_events, SMMU_PMCG_IMPL_MAX_EVENTS);
 	unsigned int irq;
 	unsigned int on_cpu;
 	struct pmu pmu;
@@ -416,10 +430,31 @@ static int smmu_pmu_event_init(struct perf_event *event)
 
 	/* Verify specified event is supported on this PMU */
 	event_id = get_event(event);
-	if (event_id < SMMU_PMCG_ARCH_MAX_EVENTS &&
-	    (!test_bit(event_id, smmu_pmu->supported_events))) {
-		dev_dbg(dev, "Invalid event %d for this PMU\n", event_id);
-		return -EINVAL;
+
+	/* With implementation specific events, don't bail out if it's beyond arch limit */
+	if (event_id < SMMU_PMCG_ARCH_MAX_EVENTS) {
+		if (!test_bit(event_id, smmu_pmu->supported_events)) {
+			dev_dbg(dev, "Invalid event %d for this PMU\n", event_id);
+			return -EINVAL;
+		}
+	}
+
+	if ((smmu_pmu->iidr >> SMMU_PMCG_PART_0_SHIFT) == SMMU_PMCG_TCU) {
+		if (event_id < SMMU_PMCG_IMPL_MAX_EVENTS) {
+			if (!test_bit(event_id, smmu_pmu->tcu_supported_events)) {
+				dev_dbg(dev, "Invalid TCU event %d for this PMU\n", event_id);
+				return -EINVAL;
+			}
+		}
+	}
+
+	if ((smmu_pmu->iidr >> SMMU_PMCG_PART_0_SHIFT) == SMMU_PMCG_TBU) {
+		if (event_id < SMMU_PMCG_IMPL_MAX_EVENTS) {
+			if (!test_bit(event_id, smmu_pmu->tbu_supported_events)) {
+				dev_dbg(dev, "Invalid TBU event %d for this PMU\n", event_id);
+				return -EINVAL;
+			}
+		}
 	}
 
 	/* Don't allow groups with mixed PMUs, except for s/w events */
@@ -579,6 +614,79 @@ static struct attribute *smmu_pmu_events[] = {
 	NULL
 };
 
+/* Arch/TCU implementation events */
+static struct attribute *smmu_tcu_pmu_events[] = {
+	SMMU_EVENT_ATTR(cycles, 0),
+	SMMU_EVENT_ATTR(transaction, 1),
+	SMMU_EVENT_ATTR(tlb_miss, 2),
+	SMMU_EVENT_ATTR(config_cache_miss, 3),
+	SMMU_EVENT_ATTR(trans_table_walk_access, 4),
+	SMMU_EVENT_ATTR(config_struct_access, 5),
+	SMMU_EVENT_ATTR(pcie_ats_trans_rq, 6),
+	/* TCU events */
+	SMMU_EVENT_ATTR(s1l0wc_lookup, 128),
+	SMMU_EVENT_ATTR(s1l0wc_miss, 129),
+	SMMU_EVENT_ATTR(s1l1wc_lookup, 130),
+	SMMU_EVENT_ATTR(s1l1wc_miss, 131),
+	SMMU_EVENT_ATTR(s1l2wc_lookup, 132),
+	SMMU_EVENT_ATTR(s1l2wc_miss, 133),
+	SMMU_EVENT_ATTR(s1l3wc_lookup, 134),
+	SMMU_EVENT_ATTR(s1l3wc_miss, 135),
+	SMMU_EVENT_ATTR(s2l0wc_lookup, 136),
+	SMMU_EVENT_ATTR(s2l0wc_miss, 137),
+	SMMU_EVENT_ATTR(s2l1wc_lookup, 138),
+	SMMU_EVENT_ATTR(s2l1wc_miss, 139),
+	SMMU_EVENT_ATTR(s2l2wc_lookup, 140),
+	SMMU_EVENT_ATTR(s2l2wc_miss, 141),
+	SMMU_EVENT_ATTR(s2l3wc_lookup, 142),
+	SMMU_EVENT_ATTR(s2l3wc_miss, 143),
+	SMMU_EVENT_ATTR(wc_read, 144),
+	SMMU_EVENT_ATTR(buffered_trans, 145),
+	SMMU_EVENT_ATTR(cc_lookup, 146),
+	SMMU_EVENT_ATTR(cc_read, 147),
+	SMMU_EVENT_ATTR(cc_miss, 148),
+	SMMU_EVENT_ATTR(speculative_trans, 160),
+	NULL
+};
+
+/* Arch/TBU implementation events */
+static struct attribute *smmu_tbu_pmu_events[] = {
+	SMMU_EVENT_ATTR(cycles, 0),
+	SMMU_EVENT_ATTR(transaction, 1),
+	SMMU_EVENT_ATTR(tlb_miss, 2),
+	SMMU_EVENT_ATTR(pcie_ats_trans_passed, 7),
+
+	SMMU_EVENT_ATTR(main_lookup, 128),
+	SMMU_EVENT_ATTR(main_miss, 129),
+	SMMU_EVENT_ATTR(main_read, 130),
+	SMMU_EVENT_ATTR(microtlb_lookup, 131),
+	SMMU_EVENT_ATTR(microtlb_miss, 132),
+	SMMU_EVENT_ATTR(slots_full, 133),
+	SMMU_EVENT_ATTR(out_of_trans_tokens, 134),
+	SMMU_EVENT_ATTR(write_data_buff_full, 135),
+	SMMU_EVENT_ATTR(dcmo_downgrade, 139),
+	SMMU_EVENT_ATTR(stash_fail, 140),
+
+	SMMU_EVENT_ATTR(port_slots_full0, 208),
+	SMMU_EVENT_ATTR(slots_full1, 209),
+	SMMU_EVENT_ATTR(slots_full2, 210),
+	SMMU_EVENT_ATTR(slots_full3, 211),
+	SMMU_EVENT_ATTR(slots_full4, 212),
+	SMMU_EVENT_ATTR(slots_full5, 213),
+	SMMU_EVENT_ATTR(slots_full6, 214),
+	SMMU_EVENT_ATTR(slots_full7, 215),
+
+	SMMU_EVENT_ATTR(port_out_of_trans_tokens_full0, 224),
+	SMMU_EVENT_ATTR(port_out_of_trans_tokens_full1, 225),
+	SMMU_EVENT_ATTR(port_out_of_trans_tokens_full2, 226),
+	SMMU_EVENT_ATTR(port_out_of_trans_tokens_full3, 227),
+	SMMU_EVENT_ATTR(port_out_of_trans_tokens_full4, 228),
+	SMMU_EVENT_ATTR(port_out_of_trans_tokens_full5, 229),
+	SMMU_EVENT_ATTR(port_out_of_trans_tokens_full6, 230),
+	SMMU_EVENT_ATTR(port_out_of_trans_tokens_full7, 231),
+	NULL
+};
+
 static umode_t smmu_pmu_event_is_visible(struct kobject *kobj,
 					 struct attribute *attr, int unused)
 {
@@ -591,12 +699,30 @@ static umode_t smmu_pmu_event_is_visible(struct kobject *kobj,
 	if (test_bit(pmu_attr->id, smmu_pmu->supported_events))
 		return attr->mode;
 
+	if (test_bit(pmu_attr->id, smmu_pmu->tcu_supported_events))
+		return attr->mode;
+
+	if (test_bit(pmu_attr->id, smmu_pmu->tbu_supported_events))
+		return attr->mode;
+
 	return 0;
 }
 
 static const struct attribute_group smmu_pmu_events_group = {
 	.name = "events",
 	.attrs = smmu_pmu_events,
+	.is_visible = smmu_pmu_event_is_visible,
+};
+
+static const struct attribute_group smmu_pmu_tcu_events_group = {
+	.name = "events",
+	.attrs = smmu_tcu_pmu_events,
+	.is_visible = smmu_pmu_event_is_visible,
+};
+
+static const struct attribute_group smmu_pmu_tbu_events_group = {
+	.name = "events",
+	.attrs = smmu_tbu_pmu_events,
 	.is_visible = smmu_pmu_event_is_visible,
 };
 
@@ -656,6 +782,22 @@ static const struct attribute_group smmu_pmu_format_group = {
 static const struct attribute_group *smmu_pmu_attr_grps[] = {
 	&smmu_pmu_cpumask_group,
 	&smmu_pmu_events_group,
+	&smmu_pmu_format_group,
+	&smmu_pmu_identifier_group,
+	NULL
+};
+
+static const struct attribute_group *smmu_tcu_pmu_attr_grps[] = {
+	&smmu_pmu_cpumask_group,
+	&smmu_pmu_tcu_events_group,
+	&smmu_pmu_format_group,
+	&smmu_pmu_identifier_group,
+	NULL
+};
+
+static const struct attribute_group *smmu_tbu_pmu_attr_grps[] = {
+	&smmu_pmu_cpumask_group,
+	&smmu_pmu_tbu_events_group,
 	&smmu_pmu_format_group,
 	&smmu_pmu_identifier_group,
 	NULL
@@ -819,7 +961,8 @@ static void smmu_pmu_get_iidr(struct smmu_pmu *smmu_pmu)
 {
 	u32 iidr = readl_relaxed(smmu_pmu->reg_base + SMMU_PMCG_IIDR);
 
-	if (!iidr && smmu_pmu_coresight_id_regs(smmu_pmu)) {
+	/* Check for either device-tree or ACPI */
+	if (!iidr && (smmu_pmu_coresight_id_regs(smmu_pmu) || has_acpi_companion(smmu_pmu->dev))) {
 		u32 pidr0 = readl(smmu_pmu->reg_base + SMMU_PMCG_PIDR0);
 		u32 pidr1 = readl(smmu_pmu->reg_base + SMMU_PMCG_PIDR1);
 		u32 pidr2 = readl(smmu_pmu->reg_base + SMMU_PMCG_PIDR2);
@@ -850,6 +993,8 @@ static int smmu_pmu_probe(struct platform_device *pdev)
 	struct resource *res_0;
 	u32 cfgr, reg_size;
 	u64 ceid_64[2];
+	u64 tcu_implid_64[4] = {0};
+	u64 tbu_implid_64[4] = {0};
 	int irq, err;
 	char *name;
 	struct device *dev = &pdev->dev;
@@ -918,6 +1063,24 @@ static int smmu_pmu_probe(struct platform_device *pdev)
 
 	smmu_pmu_get_iidr(smmu_pmu);
 
+	/* For TCU/TBU, they have different event lists, so set accordingly */
+	if ((smmu_pmu->iidr >> SMMU_PMCG_PART_0_SHIFT) == SMMU_PMCG_TCU) {
+		smmu_pmu->pmu.attr_groups = smmu_tcu_pmu_attr_grps;
+
+		tcu_implid_64[2] = SMMU_TCUID_INDEX_2;
+		bitmap_from_arr32(smmu_pmu->tcu_supported_events, (u32 *)tcu_implid_64,
+				  SMMU_PMCG_IMPL_MAX_EVENTS);
+	}
+
+	if ((smmu_pmu->iidr >> SMMU_PMCG_PART_0_SHIFT) == SMMU_PMCG_TBU) {
+		smmu_pmu->pmu.attr_groups = smmu_tbu_pmu_attr_grps;
+
+		tbu_implid_64[2] = SMMU_TBUID_INDEX_2;
+		tbu_implid_64[3] = SMMU_TBUID_INDEX_3;
+		bitmap_from_arr32(smmu_pmu->tbu_supported_events, (u32 *)tbu_implid_64,
+				  SMMU_PMCG_IMPL_MAX_EVENTS);
+	}
+
 	name = devm_kasprintf(&pdev->dev, GFP_KERNEL, "smmuv3_pmcg_%llx",
 			      (res_0->start) >> SMMU_PMCG_PA_SHIFT);
 	if (!name) {
@@ -925,7 +1088,8 @@ static int smmu_pmu_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	if (!dev->of_node)
+	/* Only gets set if PMCG information is in IORT */
+	if (!dev->of_node && dev_get_platdata(smmu_pmu->dev))
 		smmu_pmu_get_acpi_options(smmu_pmu);
 
 	/*
@@ -984,6 +1148,14 @@ static void smmu_pmu_shutdown(struct platform_device *pdev)
 	smmu_pmu_disable(&smmu_pmu->pmu);
 }
 
+#ifdef CONFIG_ACPI
+static const struct acpi_device_id smmu_acpi_match[] = {
+       { "MSHW0414", },
+       { }
+};
+MODULE_DEVICE_TABLE(acpi, smmu_acpi_match);
+#endif
+
 #ifdef CONFIG_OF
 static const struct of_device_id smmu_pmu_of_match[] = {
 	{ .compatible = "arm,smmu-v3-pmcg" },
@@ -997,6 +1169,9 @@ static struct platform_driver smmu_pmu_driver = {
 		.name = "arm-smmu-v3-pmcg",
 		.of_match_table = of_match_ptr(smmu_pmu_of_match),
 		.suppress_bind_attrs = true,
+#ifdef CONFIG_ACPI
+		.acpi_match_table = ACPI_PTR(smmu_acpi_match),
+#endif
 	},
 	.probe = smmu_pmu_probe,
 	.remove = smmu_pmu_remove,
