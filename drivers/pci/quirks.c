@@ -4688,6 +4688,19 @@ static int pci_quirk_amd_sb_acs(struct pci_dev *dev, u16 acs_flags)
 #endif
 }
 
+static int pci_quirk_cobalt_accel_acs(struct pci_dev *dev, u16 acs_flags)
+{
+	/*
+	 * Cobalt Data Accelerators don't advertise an ACS capability. However,
+	 * the RCIEPs internally implement similar protection as if ACS had
+	 * Source Validation, Request Redirection, Completion Redirection,
+	 * and Upstream Forwarding features enabled.
+	 */
+	return pci_acs_ctrl_enabled(acs_flags,
+		PCI_ACS_SV | PCI_ACS_RR | PCI_ACS_CR | PCI_ACS_UF);
+}
+
+
 static bool pci_quirk_cavium_acs_match(struct pci_dev *dev)
 {
 	if (!pci_is_pcie(dev) || pci_pcie_type(dev) != PCI_EXP_TYPE_ROOT_PORT)
@@ -5193,6 +5206,9 @@ static const struct pci_dev_acs_enabled {
 	{ PCI_VENDOR_ID_ZHAOXIN, PCI_ANY_ID, pci_quirk_zhaoxin_pcie_ports_acs },
 	/* Wangxun nics */
 	{ PCI_VENDOR_ID_WANGXUN, PCI_ANY_ID, pci_quirk_wangxun_nic_acs },
+	/* Cobalt Data Accelerator */
+	{ PCI_VENDOR_ID_MICROSOFT, 0xc010, pci_quirk_cobalt_accel_acs },
+	{ PCI_VENDOR_ID_MICROSOFT, 0xc011, pci_quirk_cobalt_accel_acs },
 	{ 0 }
 };
 
