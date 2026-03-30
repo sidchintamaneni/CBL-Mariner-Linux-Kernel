@@ -20,13 +20,15 @@
 /* CPPCv2 and CPPCv3 support */
 #define CPPC_V2_REV	2
 #define CPPC_V3_REV	3
+#define CPPC_V4_REV	4
 #define CPPC_V2_NUM_ENT	21
 #define CPPC_V3_NUM_ENT	23
+#define CPPC_V4_NUM_ENT	25
 
 #define PCC_CMD_COMPLETE_MASK	(1 << 0)
 #define PCC_ERROR_MASK		(1 << 2)
 
-#define MAX_CPC_REG_ENT 21
+#define MAX_CPC_REG_ENT 25
 
 /* CPPC specific PCC commands. */
 #define	CMD_READ 0
@@ -80,6 +82,20 @@ struct cpc_desc {
 	struct kobject kobj;
 };
 
+struct cppc_cpu_ctr {
+	u64 val;
+	u32 cpu;
+};
+
+struct cppc_rw_work {
+	struct work_struct work;
+	struct cppc_cpu_ctr c;
+	struct cpc_register_resource *reg_res;
+};
+
+#define CPC_CPU_WQ_READ		0
+#define CPC_CPU_WQ_WRITE	1
+
 /* These are indexes into the per-cpu cpc_regs[]. Order is important. */
 enum cppc_regs {
 	HIGHEST_PERF,
@@ -120,6 +136,7 @@ struct cppc_perf_caps {
 	u32 lowest_freq;
 	u32 nominal_freq;
 	u32 energy_perf;
+	u32 desired_perf;
 	bool auto_sel;
 };
 
