@@ -1467,9 +1467,8 @@ u64 limit_nv_id_reg(struct kvm *kvm, u32 reg, u64 val)
 		break;
 
 	case SYS_ID_AA64ISAR1_EL1:
-		/* Support everything but LS64 and Spec Invalidation */
-		val &= ~(ID_AA64ISAR1_EL1_LS64	|
-			 ID_AA64ISAR1_EL1_SPECRES);
+		/* Support everything but Spec Invalidation */
+		val &= ~ID_AA64ISAR1_EL1_SPECRES;
 		break;
 
 	case SYS_ID_AA64PFR0_EL1:
