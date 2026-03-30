@@ -28,6 +28,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/property.h>
 #include <linux/regmap.h>
+#include <linux/string.h>
 #include <linux/swab.h>
 #include <linux/types.h>
 #include <linux/units.h>
@@ -300,11 +301,32 @@ static void i2c_dw_acpi_params(struct device *device, char method[],
 	kfree(buf.pointer);
 }
 
+static void i2c_dw_acpi_hclk_param(struct device *device, char method[],
+				   u64 *hclk_rate)
+{
+	struct acpi_buffer buf = { ACPI_ALLOCATE_BUFFER };
+	acpi_handle handle = ACPI_HANDLE(device);
+	union acpi_object *obj;
+
+	if (ACPI_FAILURE(acpi_evaluate_object(handle, method, NULL, &buf)))
+		return;
+
+	obj = (union acpi_object *)buf.pointer;
+	if (obj->type == ACPI_TYPE_PACKAGE && obj->package.count == 1) {
+		const union acpi_object *objs = obj->package.elements;
+
+		*hclk_rate = (u64)objs[0].integer.value;
+	}
+
+	kfree(buf.pointer);
+}
+
 static void i2c_dw_acpi_configure(struct device *device)
 {
 	struct dw_i2c_dev *dev = dev_get_drvdata(device);
 	struct i2c_timings *t = &dev->timings;
 	u32 ss_ht = 0, fp_ht = 0, hs_ht = 0, fs_ht = 0;
+	u64 hclk_rate = 0;
 
 	/*
 	 * Try to get SDA hold time and *CNT values from an ACPI method for
@@ -314,6 +336,13 @@ static void i2c_dw_acpi_configure(struct device *device)
 	i2c_dw_acpi_params(device, "FMCN", &dev->fs_hcnt, &dev->fs_lcnt, &fs_ht);
 	i2c_dw_acpi_params(device, "FPCN", &dev->fp_hcnt, &dev->fp_lcnt, &fp_ht);
 	i2c_dw_acpi_params(device, "HSCN", &dev->hs_hcnt, &dev->hs_lcnt, &hs_ht);
+
+	/*
+	 * For some devices, we need the hardware clock rate from the ACPI
+	 * tables.
+	 */
+	i2c_dw_acpi_hclk_param(device, "HCLK", &hclk_rate);
+	dev->acpi_clk_rate = hclk_rate / KILO;
 
 	switch (t->bus_freq_hz) {
 	case I2C_MAX_STANDARD_MODE_FREQ:
@@ -572,6 +601,11 @@ u32 i2c_dw_clk_rate(struct dw_i2c_dev *dev)
 	 * Clock is not necessary if we got LCNT/HCNT values directly from
 	 * the platform code.
 	 */
+
+	if (strstr(dev->name, "MSFT")) {
+		return dev->acpi_clk_rate;
+	}
+
 	if (!dev->get_clk_rate_khz) {
 		dev_dbg_once(dev->dev, "Callback get_clk_rate_khz() is not defined\n");
 		return 0;
