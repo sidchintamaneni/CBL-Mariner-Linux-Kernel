@@ -8,6 +8,7 @@
 #define pr_fmt(fmt) "ACPI: " fmt
 
 #include <linux/module.h>
+#include <linux/mod_devicetable.h>
 #include <linux/init.h>
 #include <linux/ioport.h>
 #include <linux/kernel.h>
@@ -31,12 +32,29 @@
 #include <acpi/apei.h>
 #include <linux/suspend.h>
 #include <linux/prmt.h>
+#include <linux/dmi.h>
 
 #include "internal.h"
 
 struct acpi_device *acpi_root;
 struct proc_dir_entry *acpi_root_dir;
 EXPORT_SYMBOL(acpi_root_dir);
+
+static const struct dmi_system_id microsoft_dmi_blacklist[] = {
+	{
+		.ident = "Microsoft C2141",
+		.matches = {
+			DMI_MATCH(DMI_BIOS_VERSION, "C2141"),
+		},
+	},
+	{
+		.ident = "Microsoft C4143",
+		.matches = {
+			DMI_MATCH(DMI_BIOS_VERSION, "C4143"),
+		},
+	},
+	{ }
+};
 
 #ifdef CONFIG_X86
 #ifdef CONFIG_ACPI_CUSTOM_DSDT
@@ -282,10 +300,13 @@ bool osc_sb_apei_support_acked;
 
 /*
  * ACPI 6.0 Section 8.4.4.2 Idle State Coordination
- * OSPM supports platform coordinated low power idle(LPI) states
+ * OSPM supports platform coordinated and OS-directed low power idle(LPI) states
  */
 bool osc_pc_lpi_support_confirmed;
 EXPORT_SYMBOL_GPL(osc_pc_lpi_support_confirmed);
+
+bool osc_os_lpi_support_confirmed;
+EXPORT_SYMBOL_GPL(osc_os_lpi_support_confirmed);
 
 /*
  * ACPI 6.2 Section 6.2.11.2 'Platform-Wide OSPM Capabilities':
@@ -397,10 +418,18 @@ static void acpi_bus_osc_negotiate_platform_control(void)
 			capbuf_ret[OSC_SUPPORT_DWORD] & OSC_SB_APEI_SUPPORT;
 		osc_pc_lpi_support_confirmed =
 			capbuf_ret[OSC_SUPPORT_DWORD] & OSC_SB_PCLPI_SUPPORT;
+		osc_os_lpi_support_confirmed =
+			capbuf_ret[OSC_SUPPORT_DWORD] & OSC_SB_OSLPI_SUPPORT;
 		osc_sb_native_usb4_support_confirmed =
 			capbuf_ret[OSC_SUPPORT_DWORD] & OSC_SB_NATIVE_USB4_SUPPORT;
 		osc_cpc_flexible_adr_space_confirmed =
 			capbuf_ret[OSC_SUPPORT_DWORD] & OSC_SB_CPC_FLEXIBLE_ADR_SPACE;
+	}
+
+	if (dmi_check_system(microsoft_dmi_blacklist)) {
+		// Neither OSC_SB_PCLPI_SUPPORT or OSC_SB_OSLPI_SUPPORT is set but
+		// firmware is otherwise filling out _LPI in the ACPI tables
+		osc_os_lpi_support_confirmed = true;
 	}
 
 	kfree(context.ret.pointer);
