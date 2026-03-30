@@ -1001,6 +1001,21 @@ int __weak cpc_read_ffh(int cpunum, struct cpc_reg *reg, u64 *val)
 }
 
 /**
+ * cpc_read_ffh_perf_pair() - Read FFH Performance register paid
+ * @cpunum:	CPU number to read
+ * @reg:	cppc register information
+ * @val:	place holder for return value
+ *
+ * Read bit_width bits from a specified address and bit_offset
+ *
+ * Return: 0 for success and error code
+ */
+int __weak cpc_read_ffh_perf_pair(int cpunum, struct cpc_reg *reg, struct cpc_reg *reg2, u64 *val)
+{
+	return -ENOTSUPP;
+}
+
+/**
  * cpc_write_ffh() - Write FFH register
  * @cpunum:	CPU number to write
  * @reg:	cppc register information
@@ -1244,6 +1259,33 @@ static void cpc_cpu_rw_wq(int cpunum, struct cpc_register_resource *reg_res, u64
 	flush_work(&cppc_work.work);
 
 	*val = flag == CPC_CPU_WQ_READ ? cppc_work.c.val : *val;
+}
+
+static int cpc_read_pair(int cpu, struct cpc_register_resource *reg_res,
+                          struct cpc_register_resource *reg_res2, u64 *val, u64 *val2)
+{
+
+       if (reg_res->cpc_entry.reg.space_id == ACPI_ADR_SPACE_FIXED_HARDWARE &&
+           reg_res2->cpc_entry.reg.space_id == ACPI_ADR_SPACE_FIXED_HARDWARE) {
+               /*
+                * We expect this to be the 2 performance related registers that
+                * need to be read as closely together as possible, so we call
+                * this special function that does that.
+                */
+               u64 regpair[2];
+
+               cpc_read_ffh_perf_pair(cpu, &reg_res->cpc_entry.reg, &reg_res2->cpc_entry.reg, regpair);
+               *val = regpair[0];
+               *val2 = regpair[1];
+       } else {
+               /*
+                * otherwise, just do the normal thing.
+                */
+               cpc_read(cpu, reg_res, val);
+               cpc_read(cpu, reg_res2, val2);
+       }
+
+       return 0;
 }
 
 static int cppc_get_reg_val_in_pcc(int cpu, struct cpc_register_resource *reg, u64 *val)
@@ -1595,6 +1637,13 @@ int cppc_get_perf_ctrs(int cpunum, struct cppc_perf_fb_ctrs *perf_fb_ctrs)
 
 	cpc_read(cpunum, delivered_reg, &delivered);
 	cpc_read(cpunum, reference_reg, &reference);
+
+	/*
+	* To eliminate variance that affects the result, read
+	* both performance registers at the same time.
+	*/
+	cpc_read_pair(cpunum, delivered_reg, reference_reg, &delivered, &reference);
+
 	cpc_read(cpunum, ref_perf_reg, &ref_perf);
 
 	/*
