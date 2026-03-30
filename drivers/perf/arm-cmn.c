@@ -193,6 +193,39 @@
 #define CMN_WP_DOWN			2
 
 
+static phys_addr_t *iso_nodes;
+static int iso_nodes_set(const char *val, const struct kernel_param *kp)
+{
+	const char *s = val;
+	char *v = (char *)val;
+	phys_addr_t *p;
+	int ret = 0, n = 2;
+	while ((s = strchr(s, ',')))
+		n++, s++;
+	p = iso_nodes = kcalloc(sizeof(*iso_nodes), n, GFP_KERNEL);
+	if (!iso_nodes)
+		return -ENOMEM;
+	while ((s = strsep(&v, ",")) && !ret)
+		ret = kstrtou64(s, 0, p++);
+	return ret;
+}
+static int iso_nodes_get(char *buf, const struct kernel_param *kp)
+{
+	phys_addr_t *p = iso_nodes;
+	int sz = 0;
+	while (p && *p)
+		sz += scnprintf(buf + sz, SZ_4K - sz, "%pap,", p++);
+	if (sz)
+		buf[sz - 1] = '\n';
+	return sz;
+}
+static const struct kernel_param_ops iso_nodes_ops = {
+	.set = iso_nodes_set,
+	.get = iso_nodes_get,
+};
+module_param_cb(isolated_nodes, &iso_nodes_ops, &iso_nodes, 0444);
+MODULE_PARM_DESC(isolated_nodes, "List of isolated nodes (by physical address)");
+
 /* Internal values for encoding event support */
 enum cmn_model {
 	CMN600 = 1,
@@ -2246,6 +2279,17 @@ static enum cmn_node_type arm_cmn_subtype(enum cmn_node_type type)
 	}
 }
 
+static bool arm_cmn_check_iso(const struct arm_cmn *cmn, u32 offset)
+{
+	phys_addr_t node = page_to_phys(vmalloc_to_page(cmn->base)) + offset;
+	dev_warn_once(cmn->dev, "Using user-provided isolation data\n");
+	for (const phys_addr_t *p = iso_nodes; *p; p++) {
+		if (*p == node)
+			return true;
+	}
+	return false;
+}	
+
 static int arm_cmn_discover(struct arm_cmn *cmn, unsigned int rgn_offset)
 {
 	void __iomem *cfg_region, __iomem *xp_region;
@@ -2284,7 +2328,7 @@ static int arm_cmn_discover(struct arm_cmn *cmn, unsigned int rgn_offset)
 	 * given port is disabled or not, so the only way to win is not to play...
 	 */
 	reg = readq_relaxed(cfg_region + CMN_CFGM_INFO_GLOBAL);
-	if (reg & CMN_INFO_DEVICE_ISO_ENABLE) {
+	if (reg & CMN_INFO_DEVICE_ISO_ENABLE && !iso_nodes) {
 		dev_err(cmn->dev, "Device isolation enabled, not continuing due to risk of lockup\n");
 		return -ENODEV;
 	}
@@ -2414,6 +2458,9 @@ static int arm_cmn_discover(struct arm_cmn *cmn, unsigned int rgn_offset)
 				dev_dbg(cmn->dev, "bogus child pointer?\n");
 				continue;
 			}
+
+			if (iso_nodes && arm_cmn_check_iso(cmn, reg & CMN_CHILD_NODE_ADDR))
+				continue;
 
 			arm_cmn_init_node_info(cmn, reg & CMN_CHILD_NODE_ADDR, dn);
 			dn->portid_bits = xp->portid_bits;
