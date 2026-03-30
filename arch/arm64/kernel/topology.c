@@ -437,6 +437,26 @@ static void cpu_read_constcnt(void *val)
 		      0UL : read_constcnt();
 }
 
+/*
+ * This function reads both registers so only a single call is needed.
+ *
+ * the val param is pointing to a 2 element array in which to place the pair of registers.
+ */
+static void cpu_read_cnt_pair(void *val)
+{
+	u64 *regs=(u64 *)val;
+
+	regs[0] = read_corecnt();
+	/*
+	 * Return 0 if the current CPU is affected by erratum 2457168. A value
+	 * of 0 is also returned if the current CPU does not support AMUs or if
+	 * the counter is disabled. A return value of 0 at counter read is
+	 * properly handled as an error case by the users of the counter.
+	 */
+	regs[1] = this_cpu_has_cap(ARM64_WORKAROUND_2457168) ?
+		      0UL : read_constcnt();
+}
+
 static inline
 int counters_read_on_cpu(int cpu, smp_call_func_t func, u64 *val)
 {
@@ -496,6 +516,31 @@ int cpc_read_ffh(int cpu, struct cpc_reg *reg, u64 *val)
 		*val &= GENMASK_ULL(reg->bit_offset + reg->bit_width - 1,
 				    reg->bit_offset);
 		*val >>= reg->bit_offset;
+	}
+
+	return ret;
+}
+
+/*
+ * Like the above function, but reads a pair of related registers near-atomically.
+ * This avoids the variations causes by reading two related counters in seperate calls.
+ *
+ * the val param is pointing to a 2 element array in which to place the pair of registers.
+ */
+int cpc_read_ffh_perf_pair(int cpu, struct cpc_reg *reg, struct cpc_reg *reg2, u64 *val)
+{
+	int ret = -EOPNOTSUPP;
+	u64 startcnt, endcnt, diffcnt;
+
+	ret = counters_read_on_cpu(cpu, cpu_read_cnt_pair, val);
+
+	if (!ret) {
+		val[0] &= GENMASK_ULL(reg->bit_offset + reg->bit_width - 1,
+				    reg->bit_offset);
+		val[0] >>= reg->bit_offset;
+		val[1] &= GENMASK_ULL(reg2->bit_offset + reg2->bit_width - 1,
+				    reg2->bit_offset);
+		val[1] >>= reg2->bit_offset;
 	}
 
 	return ret;
