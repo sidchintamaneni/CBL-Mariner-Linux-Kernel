@@ -21,7 +21,7 @@
 #define ESR_ELx_EC_CP10_ID	UL(0x08)	/* EL2 only */
 #define ESR_ELx_EC_PAC		UL(0x09)	/* EL2 and above */
 #define ESR_ELx_EC_OTHER	UL(0x0A)
-/* Unallocated EC: 0x0B */
+#define ESR_ELx_EC_LS64B	UL(0x0B)
 #define ESR_ELx_EC_CP14_64	UL(0x0C)
 #define ESR_ELx_EC_BTI		UL(0x0D)
 #define ESR_ELx_EC_ILL		UL(0x0E)
@@ -125,6 +125,7 @@
 #define ESR_ELx_FSC_SECC	(0x18)
 #define ESR_ELx_FSC_SECC_TTW(n)	(0x1c + (n))
 #define ESR_ELx_FSC_ADDRSZ	(0x00)
+#define ESR_ELx_FSC_EXCL_ATOMIC	(0x35)
 
 /*
  * Annoyingly, the negative levels for Address size faults aren't laid out
@@ -190,6 +191,11 @@
 #define ESR_ELx_ISS_OTHER_LDST64B	(2)
 #define ESR_ELx_ISS_OTHER_TSBCSYNC	(3)
 #define ESR_ELx_ISS_OTHER_PSBCSYNC	(4)
+
+/* ISS definitions for LD64B/ST64B instructions */
+#define ESR_ELx_ISS_ST64BV	(0)
+#define ESR_ELx_ISS_ST64BV0	(1)
+#define ESR_ELx_ISS_LDST64B	(2)
 
 #define DISR_EL1_IDS		(UL(1) << 24)
 /*
@@ -531,6 +537,13 @@ static inline bool esr_iss_is_eretax(unsigned long esr)
 static inline bool esr_iss_is_eretab(unsigned long esr)
 {
 	return esr & ESR_ELx_ERET_ISS_ERETA;
+}
+
+static inline bool esr_fsc_is_excl_atomic_fault(unsigned long esr)
+{
+	esr = esr & ESR_ELx_FSC;
+
+	return esr == ESR_ELx_FSC_EXCL_ATOMIC;
 }
 
 const char *esr_get_class_string(unsigned long esr);
