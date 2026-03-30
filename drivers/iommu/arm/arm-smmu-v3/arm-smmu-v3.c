@@ -46,6 +46,11 @@ MODULE_PARM_DESC(l1cd_leaf_invalidate,
 static const struct iommu_ops arm_smmu_ops;
 static struct iommu_dirty_ops arm_smmu_dirty_ops;
 
+static bool disable_pri = true;
+module_param(disable_pri, bool, 0444);
+MODULE_PARM_DESC(disable_pri,
+        "Disable PRI for PCIe devices.");
+
 enum arm_smmu_msi_index {
 	EVTQ_MSI_INDEX,
 	GERROR_MSI_INDEX,
@@ -2235,6 +2240,13 @@ int arm_smmu_enable_pri(struct arm_smmu_master *master)
 	 * devices. So we might miss some PPRs due to queue overflow.
 	 */
 	size_t max_inflight_pprs = 16;
+
+	/*
+	 * Workaround to disable PRI from getting re-enabled by the SMMU driver. SDM/CDED
+	 * cannot use PRI for KNG. For future programs, this knob will be disabled.
+	 */
+	if (disable_pri)
+		return 0;
 
 	if (!master->pri_supported || !master->ats_enabled)
 		return -ENODEV;
