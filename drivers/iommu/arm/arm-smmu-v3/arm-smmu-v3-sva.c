@@ -188,6 +188,17 @@ static void arm_smmu_mm_release(struct mmu_notifier *mn, struct mm_struct *mm)
 				     smmu_domain->cd.asid);
 		arm_smmu_write_cd_entry(master, master_domain->ssid, cdptr,
 					&target);
+		/*
+		 * For stall, the event queue does not need to be flushed since the
+		 * device driver ensured all transaction are complete. For PRI however,
+		 * although the device driver has stopped all DMA for this PASID, it may
+		 * have left Page Requests in flight (if using the Stop Marker Message
+		 * to stop PASID). Complete them.
+		 */
+		if (master->pri_supported) {
+			arm_smmu_flush_priq(master->smmu);
+			iopf_queue_flush_dev(master->dev);
+		}
 	}
 	spin_unlock_irqrestore(&smmu_domain->devices_lock, flags);
 
