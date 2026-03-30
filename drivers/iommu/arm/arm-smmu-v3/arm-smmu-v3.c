@@ -38,6 +38,11 @@ module_param(disable_msipolling, bool, 0444);
 MODULE_PARM_DESC(disable_msipolling,
 	"Disable MSI-based polling for CMD_SYNC completion.");
 
+static bool l1cd_leaf_invalidate = false;
+module_param(l1cd_leaf_invalidate, bool, 0444);
+MODULE_PARM_DESC(l1cd_leaf_invalidate,
+	"Force L1CD invalidations of all cached entries. By default this is false (leaf == 0)");
+
 static const struct iommu_ops arm_smmu_ops;
 static struct iommu_dirty_ops arm_smmu_dirty_ops;
 
@@ -1364,7 +1369,7 @@ static void arm_smmu_cd_writer_sync_entry(struct arm_smmu_entry_writer *writer)
 	struct arm_smmu_cd_writer *cd_writer =
 		container_of(writer, struct arm_smmu_cd_writer, writer);
 
-	arm_smmu_sync_cd(writer->master, cd_writer->ssid, true);
+	arm_smmu_sync_cd(writer->master, cd_writer->ssid, l1cd_leaf_invalidate);
 }
 
 static const struct arm_smmu_entry_writer_ops arm_smmu_cd_writer_ops = {
