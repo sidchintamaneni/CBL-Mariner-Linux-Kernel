@@ -262,7 +262,7 @@
  */
 static inline u32 __attribute_const__ read_cpuid_id(void)
 {
-	return read_cpuid(MIDR_EL1);
+	return (read_cpuid(MIDR_EL1) == 0x6D0FD490 ? 0x410FD490 : read_cpuid(MIDR_EL1));
 }
 
 /*
