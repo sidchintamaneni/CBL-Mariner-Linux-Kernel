@@ -6774,6 +6774,10 @@
 	smart2=		[HW]
 			Format: <io1>[,<io2>[,...,<io8>]]
 
+	smmu=           [ARM64]
+			Format: {off}
+			off: Disable arm smmu driver.
+
 	smp.csd_lock_timeout= [KNL]
 			Specify the period of time in milliseconds
 			that smp_call_function() and friends will wait
