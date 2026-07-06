@@ -201,7 +201,10 @@ struct reset_control;
  * @pclk: clock required to access the registers
  * @rst: optional reset for the controller
  * @slave: represent an I2C slave device
+ * @name: platform device name, used to identify Microsoft ("MSFT") controllers
  * @get_clk_rate_khz: callback to retrieve IP specific bus speed
+ * @acpi_clk_rate: bus clock rate in kHz obtained from the ACPI HCLK method,
+ *	used in place of @get_clk_rate_khz on Microsoft ("MSFT") controllers
  * @cmd_err: run time hardware error code
  * @msgs: points to an array of messages currently being transferred
  * @msgs_num: the number of elements in msgs
@@ -263,7 +266,9 @@ struct dw_i2c_dev {
 	struct clk		*pclk;
 	struct reset_control	*rst;
 	struct i2c_client	*slave;
+	const char		*name;
 	u32			(*get_clk_rate_khz) (struct dw_i2c_dev *dev);
+	u32			acpi_clk_rate;
 	int			cmd_err;
 	struct i2c_msg		*msgs;
 	int			msgs_num;
