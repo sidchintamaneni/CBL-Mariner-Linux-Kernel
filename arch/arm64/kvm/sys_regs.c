@@ -3008,7 +3008,7 @@ static u64 __ro_after_init boot_cpu_aidr_val;
 
 static void init_imp_id_regs(void)
 {
-	boot_cpu_midr_val = read_sysreg(midr_el1);
+	boot_cpu_midr_val = override_cobalt_midr(read_sysreg(midr_el1));
 	boot_cpu_revidr_val = read_sysreg(revidr_el1);
 	boot_cpu_aidr_val = read_sysreg(aidr_el1);
 }
