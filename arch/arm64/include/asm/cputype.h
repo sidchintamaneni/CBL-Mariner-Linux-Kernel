@@ -262,13 +262,26 @@
 #define read_cpuid(reg)			read_sysreg_s(SYS_ ## reg)
 
 /*
+ * Cobalt is an ARM Neoverse-N2 derivative but reports a Microsoft
+ * implementer ID. Present it as Neoverse-N2 so that the N2 errata and
+ * mitigations keyed on the ARM MIDR are applied.
+ */
+static inline u32 override_cobalt_midr(u32 midr)
+{
+	if (midr == MIDR_MICROSOFT_AZURE_COBALT_100)
+		return MIDR_NEOVERSE_N2;
+
+	return midr;
+}
+
+/*
  * The CPU ID never changes at run time, so we might as well tell the
  * compiler that it's constant.  Use this function to read the CPU ID
  * rather than directly reading processor_id or read_cpuid() directly.
  */
 static inline u32 __attribute_const__ read_cpuid_id(void)
 {
-	return read_cpuid(MIDR_EL1);
+	return override_cobalt_midr(read_cpuid(MIDR_EL1));
 }
 
 /*
