@@ -11,6 +11,7 @@
 #error Assembly-only header
 #endif
 
+#include <asm/cputype.h>
 #include <asm/kvm_arm.h>
 #include <asm/ptrace.h>
 #include <asm/sysreg.h>
@@ -250,6 +251,11 @@
 .macro __init_el2_nvhe_idregs
 	mrs	x0, midr_el1
 	mrs	x1, mpidr_el1
+	ldr	x2, =MIDR_MICROSOFT_AZURE_COBALT_100
+	cmp	x0, x2
+	bne	.Loverride_cobalt_\@
+	ldr	x0, =MIDR_NEOVERSE_N2
+.Loverride_cobalt_\@:
 	msr	vpidr_el2, x0
 	msr	vmpidr_el2, x1
 .endm
