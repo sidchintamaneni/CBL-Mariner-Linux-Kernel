@@ -980,6 +980,21 @@ int __weak cpc_read_ffh(int cpunum, struct cpc_reg *reg, u64 *val)
 }
 
 /**
+ * cpc_read_ffh_perf_pair() - Read a pair of FFH performance counters
+ * @cpunum:	CPU number to read
+ * @reg:	first CPPC register
+ * @reg2:	second CPPC register
+ * @val:	two-element array for the returned values
+ *
+ * Return: 0 on success, a negative error code otherwise.
+ */
+int __weak cpc_read_ffh_perf_pair(int cpunum, struct cpc_reg *reg,
+				  struct cpc_reg *reg2, u64 *val)
+{
+	return -EOPNOTSUPP;
+}
+
+/**
  * cpc_write_ffh() - Write FFH register
  * @cpunum:	CPU number to write
  * @reg:	cppc register information
@@ -1073,6 +1088,34 @@ static int cpc_read(int cpu, struct cpc_register_resource *reg_res, u64 *val)
 
 	if (reg->space_id == ACPI_ADR_SPACE_SYSTEM_MEMORY)
 		*val = MASK_VAL_READ(reg, *val);
+
+	return 0;
+}
+
+static int cpc_read_pair(int cpu, struct cpc_register_resource *reg_res,
+			 struct cpc_register_resource *reg_res2,
+			 u64 *val, u64 *val2)
+{
+	u64 regpair[2];
+	int ret;
+
+	*val = 0;
+	*val2 = 0;
+
+	if (CPC_IN_FFH(reg_res) && CPC_IN_FFH(reg_res2)) {
+		ret = cpc_read_ffh_perf_pair(cpu, &reg_res->cpc_entry.reg,
+					     &reg_res2->cpc_entry.reg,
+					     regpair);
+		if (ret)
+			return ret;
+
+		*val = regpair[0];
+		*val2 = regpair[1];
+		return 0;
+	}
+
+	cpc_read(cpu, reg_res, val);
+	cpc_read(cpu, reg_res2, val2);
 
 	return 0;
 }
@@ -1516,8 +1559,8 @@ int cppc_get_perf_ctrs(int cpunum, struct cppc_perf_fb_ctrs *perf_fb_ctrs)
 		}
 	}
 
-	cpc_read(cpunum, delivered_reg, &delivered);
-	cpc_read(cpunum, reference_reg, &reference);
+	cpc_read_pair(cpunum, delivered_reg, reference_reg,
+		      &delivered, &reference);
 	cpc_read(cpunum, ref_perf_reg, &ref_perf);
 
 	/*
