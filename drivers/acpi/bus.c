@@ -22,9 +22,9 @@
 #include <linux/workqueue.h>
 #include <linux/reboot.h>
 #include <linux/delay.h>
+#include <linux/dmi.h>
 #ifdef CONFIG_X86
 #include <asm/mpspec.h>
-#include <linux/dmi.h>
 #endif
 #include <linux/acpi_viot.h>
 #include <linux/pci.h>
@@ -37,6 +37,22 @@
 struct acpi_device *acpi_root;
 struct proc_dir_entry *acpi_root_dir;
 EXPORT_SYMBOL(acpi_root_dir);
+
+static const struct dmi_system_id microsoft_lpi_quirks[] = {
+	{
+		.ident = "Microsoft C2141",
+		.matches = {
+			DMI_MATCH(DMI_BIOS_VERSION, "C2141"),
+		},
+	},
+	{
+		.ident = "Microsoft C4143",
+		.matches = {
+			DMI_MATCH(DMI_BIOS_VERSION, "C4143"),
+		},
+	},
+	{ }
+};
 
 #ifdef CONFIG_X86
 #ifdef CONFIG_ACPI_CUSTOM_DSDT
@@ -287,6 +303,9 @@ bool osc_sb_apei_support_acked;
 bool osc_pc_lpi_support_confirmed;
 EXPORT_SYMBOL_GPL(osc_pc_lpi_support_confirmed);
 
+bool acpi_lpi_support_quirk;
+EXPORT_SYMBOL_GPL(acpi_lpi_support_quirk);
+
 /*
  * ACPI 6.2 Section 6.2.11.2 'Platform-Wide OSPM Capabilities':
  *   Starting with ACPI Specification 6.2, all _CPC registers can be in
@@ -402,6 +421,13 @@ static void acpi_bus_osc_negotiate_platform_control(void)
 		osc_cpc_flexible_adr_space_confirmed =
 			capbuf_ret[OSC_SUPPORT_DWORD] & OSC_SB_CPC_FLEXIBLE_ADR_SPACE;
 	}
+
+	/*
+	 * C2141 and C4143 firmware provides valid _LPI tables but does not
+	 * acknowledge platform-coordinated LPI support through _OSC.
+	 */
+	if (dmi_check_system(microsoft_lpi_quirks))
+		acpi_lpi_support_quirk = true;
 
 	kfree(context.ret.pointer);
 }
