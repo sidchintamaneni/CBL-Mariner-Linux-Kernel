@@ -1105,7 +1105,7 @@ static int acpi_processor_get_lpi_info(struct acpi_processor *pr)
 	if (ret == -EOPNOTSUPP)
 		return ret;
 
-	if (!osc_pc_lpi_support_confirmed)
+	if (!osc_pc_lpi_support_confirmed && !acpi_lpi_support_quirk)
 		return -EOPNOTSUPP;
 
 	if (!acpi_has_method(handle, "_LPI"))
